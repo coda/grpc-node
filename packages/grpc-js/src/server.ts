@@ -639,6 +639,57 @@ export class Server {
 
       this.sessions.add(session);
 
+      // TODO: Maybe also implement support for grpc.keepalive_permit_without_calls?
+
+      if ('grpc.keepalive_time_ms' in this.options) {
+        // This timeout will be cleaned up automatically as a part of session closing.
+        session.setTimeout(this.options['grpc.keepalive_time_ms']!, () => {
+          // TODO: Delete this after testing
+          logging.log(LogVerbosity.INFO,
+            `Sending session keepalive ping after ${this.options['grpc.keepalive_time_ms']}ms idle`);
+
+          let pingSuccess = false;
+
+          // Default 20s timeout matches grpc implementation documented here:
+          // https://github.com/grpc/grpc/blob/master/doc/keepalive.md
+          const pingTimeoutMs: number = 'grpc.keepalive_timeout_ms' in this.options ?
+            this.options['grpc.keepalive_timeout_ms']! : 20000;
+          
+          const pingWatchdog = setTimeout(() => {
+            if (!pingSuccess) {
+              // TODO: What verbosity is appropriate?
+              logging.log(LogVerbosity.ERROR,
+                `Closing http session because no ping response heard after ${pingTimeoutMs}ms.`);
+              session.close();
+            }
+          }, pingTimeoutMs);
+
+          const wasPingSent = session.ping((err: Error | null, duration: number) => {
+            if (!err) {
+              pingSuccess = true;
+              clearTimeout(pingWatchdog);
+              return;
+            }
+            // TODO: What verbosity is appropriate?
+            logging.log(LogVerbosity.ERROR,
+               `Error on keepalive ping: [name]:${err.name} [message]:${err.message} [stack]:${err.stack}`);
+
+            // TODO: Are there errors which should make us close the session immediately?
+
+            // TODO: Maybe cancel pingWatchdog in certain possible error states. 
+            // E.g., from https://github.com/nodejs/node/blob/master/lib/internal/http2/core.js#L1342
+            //   If ping is called while we are still connecting, or after close() has
+            //   been called, the ping callback will be invoked immediately with a ping
+            //   cancelled error and a duration of 0.0.
+          });
+
+          if (!wasPingSent) {
+            // TODO: Should we cancel the session if we can't send a ping?
+            logging.log(LogVerbosity.ERROR, `Failed to send keepalive ping.`);
+          }
+        });
+      }
+
       session.on('close', () => {
         this.sessions.delete(session);
       });
