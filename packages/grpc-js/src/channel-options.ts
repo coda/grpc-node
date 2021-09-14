@@ -26,6 +26,9 @@ export interface ChannelOptions {
   'grpc.keepalive_time_ms'?: number;
   'grpc.keepalive_timeout_ms'?: number;
   'grpc.keepalive_permit_without_calls'?: number;
+  'grpc.max_connection_idle_ms'?: number;
+  'grpc.max_connection_age_ms'?: number;
+  'grpc.max_connection_age_grace_ms'?: number;
   'grpc.service_config'?: string;
   'grpc.max_concurrent_streams'?: number;
   'grpc.initial_reconnect_backoff_ms'?: number;

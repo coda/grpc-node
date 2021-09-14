@@ -44,7 +44,7 @@ import {
   ServerStatusResponse,
 } from './server-call';
 import { ServerCredentials } from './server-credentials';
-import { ChannelOptions } from './channel-options';
+import { ChannelOptions, channelOptionsEqual } from './channel-options';
 import {
   createResolver,
   ResolverListener,
@@ -138,6 +138,9 @@ export class Server {
 
   constructor(options?: ChannelOptions) {
     this.options = options ?? {};
+
+    console.log('GRPCGRPC - server constructor');
+    console.log(options);
   }
 
   addProtoService(): void {
@@ -641,25 +644,35 @@ export class Server {
 
       // TODO: Maybe also implement support for grpc.keepalive_permit_without_calls?
 
-      if ('grpc.keepalive_time_ms' in this.options) {
+      // TODO: maybe more options?
+      // grpc.max_connection_age_ms
+      // grpc.max_connection_age_grace_ms
+
+      function tmpLog(s: string) {
+        console.log(s);
+        logging.log(LogVerbosity.ERROR, s);
+      }
+
+      const keepaliveTimeMs = this.options['grpc.keepalive_time_ms'];
+      console.log('GRPCGRPC - new session - keepalive_time_ms: '+keepaliveTimeMs);
+      if (keepaliveTimeMs) {
         // This timeout will be cleaned up automatically as a part of session closing.
-        session.setTimeout(this.options['grpc.keepalive_time_ms']!, () => {
+        session.setTimeout(keepaliveTimeMs, () => {
           // TODO: Delete this after testing
-          logging.log(LogVerbosity.INFO,
-            `Sending session keepalive ping after ${this.options['grpc.keepalive_time_ms']}ms idle`);
+          tmpLog(`Sending session keepalive ping after ${keepaliveTimeMs}ms idle`);
 
           let pingSuccess = false;
 
           // Default 20s timeout matches grpc implementation documented here:
           // https://github.com/grpc/grpc/blob/master/doc/keepalive.md
-          const pingTimeoutMs: number = 'grpc.keepalive_timeout_ms' in this.options ?
-            this.options['grpc.keepalive_timeout_ms']! : 20000;
+          const pingTimeoutMs: number = this.options['grpc.keepalive_timeout_ms'] || 20000;
+          tmpLog('GRPCGRPC - keepalive_timeout_ms: '+pingTimeoutMs);
           
+          // TODO: Do we need to be super careful and ensure this is always cleared on session close?
           const pingWatchdog = setTimeout(() => {
             if (!pingSuccess) {
               // TODO: What verbosity is appropriate?
-              logging.log(LogVerbosity.ERROR,
-                `Closing http session because no ping response heard after ${pingTimeoutMs}ms.`);
+              tmpLog(`Closing http session because no ping response heard after ${pingTimeoutMs}ms.`);
               session.close();
             }
           }, pingTimeoutMs);
@@ -671,8 +684,7 @@ export class Server {
               return;
             }
             // TODO: What verbosity is appropriate?
-            logging.log(LogVerbosity.ERROR,
-               `Error on keepalive ping: [name]:${err.name} [message]:${err.message} [stack]:${err.stack}`);
+            tmpLog(`Error on keepalive ping: [name]:${err.name} [message]:${err.message} [stack]:${err.stack}`);
 
             // TODO: Are there errors which should make us close the session immediately?
 
@@ -685,10 +697,21 @@ export class Server {
 
           if (!wasPingSent) {
             // TODO: Should we cancel the session if we can't send a ping?
-            logging.log(LogVerbosity.ERROR, `Failed to send keepalive ping.`);
+            tmpLog(`Failed to send keepalive ping.`);
           }
         });
       }
+
+      // TODO: Can we set 2 timeouts at the same time?
+      // TODO: Will a ping make the connection not idle?
+      /*
+      const maxConnectionIdleMs = this.options['grpc.max_connection_idle_ms'];
+      if (maxConnectionIdleMs) {
+        session.setTimeout(maxConnectionIdleMs, () => {
+          session.close();
+        });
+      }
+      */
 
       session.on('close', () => {
         this.sessions.delete(session);
